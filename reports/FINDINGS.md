@@ -280,3 +280,74 @@ capital growth with the drawdown tolerance to sit through it, C earns more.**
 - Roughly 130 variations were tested. Some of the gap between A and C is search.
 - C's 33% win rate changes what trading it feels like: a 12-trade losing run is normal,
   not a malfunction, and most people abandon a system there.
+
+---
+
+# Phase five — will it pass a funded evaluation?
+
+Expectancy is not what an evaluation tests. It tests whether the equity path touches
+a limit before it reaches the target, which depends on risk per trade and on the
+order the losses happen to arrive in. So the answer is a probability.
+
+Method: block bootstrap (blocks of 20 trades, so losing streaks survive the
+resampling), 1,500 simulated evaluations per cell, $100k nominal, fixed-fractional
+risk. Intraday equity is modelled, not just closed trades: one position at a time
+with a hard stop means floating loss never exceeds 1R, so the worst point of any day
+is the running total minus one risk unit. The daily limit resets at midnight platform
+time (UTC+3), not UTC.
+
+Rules used: 6% + 6% targets, static drawdown from the starting balance. Their own
+site is unreachable from this container and third-party sources conflict on the
+limits, so both plausible sets are shown.
+
+## Probability of passing both phases
+
+**Tight limits (3% daily, 6% max)**
+
+| variant | 0.25% | 0.50% | 0.75% | 1.00% |
+|---|---|---|---|---|
+| **A. your 1:1** | 63.5% | **80.7%** | 38.0% | 17.0% |
+| B. 2.5R target | 76.3% | 54.4% | 33.0% | 18.1% |
+| C. trail from 2.5R | 76.7% | 51.3% | 34.6% | 17.4% |
+
+**Loose limits (5% daily, 10% max)**
+
+| variant | 0.25% | 0.50% | 0.75% | 1.00% |
+|---|---|---|---|---|
+| **A. your 1:1** | 63.7% | **91.8%** | 87.9% | 61.1% |
+| B. 2.5R target | 82.7% | 81.1% | 65.9% | 54.6% |
+| C. trail from 2.5R | 87.1% | 77.3% | 62.5% | 50.1% |
+
+(At 0.25% risk the lower pass rates are not failures — most of those runs simply had
+not reached the target within 17 months of trades.)
+
+## This reverses the phase-four recommendation
+
+The trailing version earns 76% more per month, yet **passes less often**, because an
+evaluation does not reward expectancy, it punishes drawdown. A 33% win rate with
+twelve-trade losing runs is exactly the shape of equity curve these rules are
+designed to eliminate.
+
+## Once funded: reaching a 5% payout before breaching
+
+| | 0.25% risk | 0.50% | 0.75% |
+|---|---|---|---|
+| A, tight limits | 95.9% | 91.1% | 67.3% |
+| C, tight limits | 87.8% | 70.5% | 59.4% |
+| A, loose limits | — | 97.8% | 93.9% |
+| C, loose limits | — | 86.9% | 77.7% |
+
+## Recommendation
+
+**Trade your original 1:1 rules with the volatility filter, at 0.5% risk per trade.**
+
+- Tight limits: 80.7% pass, about 6 months.
+- Loose limits: 91.8% pass, about 6 months; 0.75% risk gives 87.9% in 3.7 months.
+- Funded: 91–98% chance of a payout before a breach.
+
+Doubling risk to 1% roughly halves the pass rate while only halving the time. It is
+a bad trade. The impatience that makes 1% attractive is the single largest threat to
+the account.
+
+Keep the wider-target versions for a personal account where no external drawdown
+limit exists.

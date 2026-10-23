@@ -12,10 +12,9 @@ from engine import Params, simulate  # noqa: E402
 
 SURFACE, INK, INK_2, GRID = "#fcfcfb", "#0b0b0b", "#52514e", "#e4e3df"
 BASE_C, FILT_C = "#86b6ef", "#1c5cab"  # same hue, light = fewer filters
-COST = 0.25
-
 CFG = dict(trend="slope", trend_len=10, wick_tol=0.0, wait_bars=7,
-           stop_mode="pivot", buffer_atr=0.0, cost=COST)
+           stop_mode="pivot", buffer_atr=0.0,
+           use_bar_spread=True, commission=0.07, stop_slip=0.10)
 
 
 def draw(df, out_path):
@@ -49,13 +48,14 @@ def draw(df, out_path):
                     xytext=(6, -3), textcoords="offset points", color=colour,
                     fontsize=9.5)
 
-    ax.set_title(f"Cumulative result at ${COST:.2f} round-trip cost",
-                 color=INK, fontsize=13, loc="left", pad=10)
+    ax.set_title("Cumulative result, charging the spread recorded on each bar "
+                 "plus $7/lot and 10c of stop slippage",
+                 color=INK, fontsize=11.5, loc="left", pad=10)
     ax.set_ylabel("cumulative R", color=INK_2, fontsize=10)
     ax.xaxis.set_major_formatter(mdates.DateFormatter("%b %Y"))
     ax.legend(frameon=False, labelcolor=INK_2, fontsize=9.5, loc="upper left")
     ax.margins(x=0.14)
-    fig.suptitle("Only the volatility filter survived testing",
+    fig.suptitle("Your rules on your own broker's data, with your own costs",
                  color=INK, fontsize=14.5, fontweight="bold", x=0.02, ha="left")
     fig.tight_layout(rect=(0, 0, 1, 0.94))
     fig.savefig(out_path, dpi=150, facecolor=SURFACE)
@@ -63,5 +63,5 @@ def draw(df, out_path):
 
 
 if __name__ == "__main__":
-    data = pd.read_csv("/home/user/something/data/xauusd_5m_mt5.csv", parse_dates=["time"])
-    draw(data, "/home/user/something/reports/final_comparison.png")
+    data = pd.read_csv("/home/user/something/data/xauusd_5m_fp.csv", parse_dates=["time"])
+    draw(data, "/home/user/something/reports/fundingpips_result.png")

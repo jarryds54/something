@@ -136,3 +136,40 @@ def test_malformed_bars_are_rejected():
     df = bars([[100, 102, 99, 101], [100, 99, 101, 100]])  # second bar: low above high
     with pytest.raises(ValueError, match="malformed"):
         validate_bars(df)
+
+
+def test_bar_spread_cost_is_charged_from_the_right_bar():
+    """A long pays the spread where it entered; a short where it exited."""
+    df, _ = _uptrend_then_retest()
+    df = df.assign(spread=5)                      # 5 points = $0.05 at 2 decimals
+    df.loc[df.index >= 44, "spread"] = 100        # $1.00 later on
+    p = dict(trend="slope", trend_thresh=0.5, stop_mode="bars",
+             use_bar_spread=True, commission=0.02)
+    t = simulate(df, Params(**p))
+    assert len(t) == 1
+    tr = t.iloc[0]
+    assert tr["dir"] == 1
+    entry_spread = df["spread"].iloc[int(tr["entry_i"])] * 0.01
+    assert tr["cost"] == pytest.approx(entry_spread + 0.02)
+
+
+def test_spread_mult_scales_the_cost():
+    df, _ = _uptrend_then_retest()
+    df = df.assign(spread=20)
+    p = dict(trend="slope", trend_thresh=0.5, stop_mode="bars",
+             use_bar_spread=True, commission=0.0)
+    one = simulate(df, Params(**p, spread_mult=1.0)).iloc[0]["cost"]
+    two = simulate(df, Params(**p, spread_mult=2.0)).iloc[0]["cost"]
+    assert two == pytest.approx(2 * one)
+
+
+def test_stop_slippage_only_worsens_losing_exits():
+    df, _ = _uptrend_then_retest()
+    rows = df[["open", "high", "low", "close"]].values.tolist()
+    clean = simulate(df, Params(trend="slope", trend_thresh=0.5, stop_mode="bars",
+                                cost=0.0, stop_slip=0.0))
+    slipped = simulate(df, Params(trend="slope", trend_thresh=0.5, stop_mode="bars",
+                                  cost=0.0, stop_slip=1.0))
+    # this fixture resolves at the target, so slippage must change nothing
+    assert clean.iloc[0]["reason"] == "target"
+    assert slipped.iloc[0]["pnl"] == pytest.approx(clean.iloc[0]["pnl"])

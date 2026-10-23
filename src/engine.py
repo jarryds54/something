@@ -45,7 +45,12 @@ class Params:
 
     # --- exit and costs ---
     rr: float = 1.0
-    cost: float = 0.30          # round-trip cost in dollars per ounce
+    cost: float = 0.30          # flat round-trip cost in dollars per ounce
+    use_bar_spread: bool = False  # charge the spread recorded on the bar instead
+    commission: float = 0.07    # dollars per ounce, charged on top of a real spread
+    spread_mult: float = 1.0    # stress factor on the recorded spread
+    point_size: float = 0.01    # price move represented by one MT5 point
+    stop_slip: float = 0.0      # dollars of adverse fill when a stop is hit
     tie_break: str = "stop"     # which fills first when one bar spans both
     max_hold: int = 288         # give up after a day of 5m bars
     allow_concurrent: bool = False
@@ -228,6 +233,10 @@ def simulate(df: pd.DataFrame, p: Params) -> pd.DataFrame:
     atr_pct = d["atr_pct"].to_numpy()
     times = d["time"].to_numpy()
     hours = d["time"].dt.hour.to_numpy()
+    if p.use_bar_spread:
+        if "spread" not in d.columns:
+            raise ValueError("use_bar_spread needs a 'spread' column of MT5 points")
+        spread_px = d["spread"].to_numpy() * p.point_size * p.spread_mult
     hours_allowed = set(p.hours_allowed)
 
     side = trend_series(d, p)
@@ -239,6 +248,13 @@ def simulate(df: pd.DataFrame, p: Params) -> pd.DataFrame:
     pending = []
     trades = []
     open_trade = None
+
+    def trade_cost(t, exit_i):
+        """Bars are bid prices: a long pays the spread entering, a short exiting."""
+        if not p.use_bar_spread:
+            return p.cost
+        bar = t["entry_i"] if t["dir"] == 1 else exit_i
+        return float(spread_px[bar]) + p.commission
 
     def close_out(t, i):
         h_, l_ = hi[i], lo[i]
@@ -255,9 +271,12 @@ def simulate(df: pd.DataFrame, p: Params) -> pd.DataFrame:
             price, reason = d["close"].iat[i], "timeout"
         else:
             return None
+        if p.stop_slip and reason.startswith(("stop", "ambiguous_stop")):
+            price -= p.stop_slip * t["dir"]  # stops fill worse than the level
         gross = (price - t["entry"]) * t["dir"]
+        cost = trade_cost(t, i)
         t.update(exit_i=i, exit_time=times[i], exit=price, reason=reason,
-                 pnl=gross - p.cost, r=(gross - p.cost) / t["risk"])
+                 cost=cost, pnl=gross - cost, r=(gross - cost) / t["risk"])
         return t
 
     for i in range(n):

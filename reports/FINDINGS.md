@@ -146,3 +146,63 @@ returns +49R against +23R unfiltered.
 Export the same 5-minute history from the **FundingPips** terminal. Its spread column
 records the real spread on every bar, which would replace the flat cost assumption
 with the actual cost at the moment of each trade, including the wide ones around news.
+
+---
+
+# Phase three — your own broker's data and your own costs
+
+Second export, from the FundingPips terminal, same period and timeframe. This is
+both a cost measurement and an independent check: the configuration was chosen on
+TraderScale prices and is re-tested here on a different feed.
+
+## Measured costs
+
+| spread, $/oz | 10% | 25% | median | 75% | 90% | 99% | max |
+|---|---|---|---|---|---|---|---|
+| FundingPips | 0.10 | 0.12 | **0.15** | 0.18 | 0.28 | 0.59 | 5.33 |
+
+Mean $0.18. Roughly flat through the day, widening to ~$0.26 at 22:00–23:00 UTC.
+6.8% of bars exceed $0.30. Not better than TraderScale (median $0.13) — slightly
+worse in the middle of the distribution.
+
+Charging the spread recorded on each bar plus $7/lot commission ($0.07/oz), the
+**actual cost paid averaged $0.24 per trade, a median 2.6% of risk**.
+
+## Result with real costs (plus 10c of stop slippage)
+
+| version | trades | win rate | mean R | total | max DD |
+|---|---|---|---|---|---|
+| your rules as described | 999 | 55.3% | +0.044R | +38R | — |
+| **+ volatility filter** | **592** | **56.9%** | **+0.089R** | **+53R** | −11.5R |
+
+Positive in train, validate and holdout for both versions. 12 of 18 months
+profitable; the best month is 21% of the total, so it is not one lucky window.
+
+## Stress tests (filtered version, full period)
+
+| scenario | mean R | total |
+|---|---|---|
+| measured spreads, $7/lot | +0.097R | +58R |
+| commission charged per side ($0.14/oz) | +0.084R | +50R |
+| spreads × 1.5 | +0.082R | +49R |
+| spreads × 2 and commission per side | +0.054R | +32R |
+| 25c slippage on every stop | +0.077R | +46R |
+| 50c slippage on every stop | +0.057R | +34R |
+| $1.00 slippage on every stop | +0.017R | +10R |
+
+The edge only disappears under conditions well outside anything normal.
+
+## Conclusion
+
+The strategy is **viable at your costs**, at roughly +0.09R per trade over about
+35 trades a month. That is a grinding edge, not a large one: expect long flat
+stretches, and six losing months in eighteen.
+
+## What is still not modelled
+
+- **Limit fills are assumed.** Every entry assumes an order filled exactly at the
+  level. In fast moves that is optimistic.
+- **Stops are assumed to fill at the stop**, adjusted only by the flat slippage above.
+- One instrument, one 17-month period containing an exceptional gold move.
+- The trend filter is `slope`, a mechanical proxy for a judgement you make by eye.
+  It agrees with you often, not always.

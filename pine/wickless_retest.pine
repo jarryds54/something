@@ -1,0 +1,239 @@
+//@version=6
+// Wickless-candle retest — XAUUSD 5-minute
+//
+// Mirrors the Python backtest in this repository (src/engine.py). The rules:
+//   1. In a trend, find a candle with no wick on the trend side
+//      (uptrend: a bullish candle whose low equals its open).
+//   2. Mark that open as a level.
+//   3. If price returns to the level within the next few candles, enter with the trend.
+//   4. Stop beyond the most recent swing against the position, target at 1:1.
+//   5. Only when volatility is above its recent median, and stop for the day after -2R.
+//
+// Defaults are the configuration that tested best for a FundingPips 2-Step Pro
+// evaluation: 94.3% simulated pass rate at 0.5% risk with the daily stop.
+
+strategy("Wickless Retest — XAUUSD 5m", overlay = true,
+     initial_capital       = 100000,
+     default_qty_type      = strategy.fixed,
+     pyramiding            = 0,
+     calc_on_every_tick    = false,
+     process_orders_on_close = false,
+     commission_type       = strategy.commission.cash_per_contract,
+     commission_value      = 0.035)   // $7 per 100oz lot, charged per side
+
+// ─── inputs ──────────────────────────────────────────────────────────────────
+grpS = "Signal"
+trendLen    = input.int(10,   "Trend lookback (bars)",        group = grpS, minval = 2)
+trendThresh = input.float(1.0,"Trend strength (x ATR)",       group = grpS, step = 0.1)
+wickTol     = input.float(0.0,"Wick tolerance ($)",           group = grpS, step = 0.01,
+     tooltip = "0 means the wick must be exactly absent. Any tolerance destroyed the edge in testing.")
+waitBars    = input.int(7,    "Candles to wait for the retest", group = grpS, minval = 1)
+
+grpV = "Filters"
+useVolFilter = input.bool(true, "Only trade above-median volatility", group = grpV)
+volPct       = input.float(0.40,"Minimum ATR percentile",            group = grpV, minval = 0, maxval = 1, step = 0.05)
+volWindow    = input.int(2000,  "Percentile window (bars)",          group = grpV, minval = 200)
+
+grpE = "Stop and target"
+pivotK      = input.int(2,    "Swing definition (bars either side)", group = grpE, minval = 1)
+stopLookback= input.int(20,   "Search this many bars for the swing", group = grpE, minval = 2)
+bufferAtr   = input.float(0.0,"Extra room beyond the swing (x ATR)", group = grpE, step = 0.05)
+minStop     = input.float(0.5,"Minimum stop ($)",                    group = grpE, step = 0.1)
+maxStopAtr  = input.float(10.0,"Maximum stop (x ATR)",               group = grpE, step = 0.5)
+rr          = input.float(1.0,"Target (x risk)",                     group = grpE, step = 0.25)
+useTrail    = input.bool(false,"Trail instead of a fixed target",    group = grpE,
+     tooltip = "The higher-earning variant: trails 2x ATR once 2.5R is open. Earns more per trade but passes evaluations far less often.")
+trailMult   = input.float(2.0,"Trail distance (x ATR)",              group = grpE, step = 0.25)
+trailStartR = input.float(2.5,"Start trailing after (R)",            group = grpE, step = 0.25)
+
+grpR = "Risk"
+riskPct     = input.float(0.5,"Risk per trade (% of equity)",        group = grpR, step = 0.05)
+dailyStopR  = input.float(2.0,"Stop for the day after losing (R)",   group = grpR, step = 0.5,
+     tooltip = "0 disables. This is what keeps the worst day inside a 3% daily limit.")
+tzOffset    = input.int(3,    "Broker hours ahead of UTC",           group = grpR,
+     tooltip = "FundingPips platform time is UTC+3; the daily limit resets at its midnight.")
+
+grpD = "Display"
+showLevels  = input.bool(true, "Draw levels", group = grpD)
+showSignals = input.bool(true, "Mark wickless candles", group = grpD)
+
+// ─── indicators ──────────────────────────────────────────────────────────────
+atr = ta.atr(14)
+
+// trend: has price moved more than `trendThresh` ATR over the lookback?
+move    = close - close[trendLen]
+upTrend = bar_index > trendLen and move >  trendThresh * atr
+dnTrend = bar_index > trendLen and move < -trendThresh * atr
+
+// volatility regime, judged against the recent past only (shifted by one bar)
+atrRank = ta.percentrank(atr, volWindow)[1] / 100.0
+volOk   = not useVolFilter or (not na(atrRank) and atrRank >= volPct)
+
+// a candle with no wick on the trend side
+bullWickless = close > open and (open - low)  <= wickTol
+bearWickless = close < open and (high - open) <= wickTol
+
+// most recent confirmed swing, and the bar it formed on
+pivLo = ta.pivotlow(low, pivotK, pivotK)
+pivHi = ta.pivothigh(high, pivotK, pivotK)
+var float lastPivLo    = na
+var int   lastPivLoBar = na
+var float lastPivHi    = na
+var int   lastPivHiBar = na
+if not na(pivLo)
+    lastPivLo    := pivLo
+    lastPivLoBar := bar_index - pivotK
+if not na(pivHi)
+    lastPivHi    := pivHi
+    lastPivHiBar := bar_index - pivotK
+
+// ─── daily loss tracking (broker time, not exchange time) ────────────────────
+dayId   = math.floor((time + tzOffset * 3600000) / 86400000)
+newDay  = ta.change(dayId) != 0
+var float dayR       = 0.0
+var int   lastClosed = 0
+// risk in dollars for each pending order, so the trade that fills is matched to
+// its own risk rather than whichever order happened to be placed last
+var map<string, float> riskById = map.new<string, float>()
+var float curRisk    = na       // risk of the position currently open
+var string curId     = na
+
+if newDay
+    dayR := 0.0
+
+// a position just opened: find which order filled, and remember its risk
+var float justFilledAt = na
+var int   justFilledDir = 0
+if strategy.position_size != 0 and nz(strategy.position_size[1], 0) == 0
+    if strategy.opentrades > 0
+        filled = strategy.opentrades.entry_id(0)
+        curId  := filled
+        curRisk := map.contains(riskById, filled) ? map.get(riskById, filled) : na
+        justFilledAt  := strategy.opentrades.entry_price(0)
+        justFilledDir := strategy.position_size > 0 ? 1 : -1
+
+// bank the R of anything that closed since the previous bar, looking each trade's
+// risk up by the entry it came from — a trade that opened and closed inside one
+// bar never updates curRisk, so that cannot be relied on here
+if strategy.closedtrades > lastClosed
+    for i = lastClosed to strategy.closedtrades - 1
+        eid  = strategy.closedtrades.entry_id(i)
+        rsk  = map.contains(riskById, eid) ? map.get(riskById, eid) : na
+        if not na(rsk) and rsk > 0
+            dayR += strategy.closedtrades.profit(i) / rsk
+    lastClosed := strategy.closedtrades
+
+dayBlocked = dailyStopR > 0 and dayR <= -dailyStopR
+
+// ─── pending levels ──────────────────────────────────────────────────────────
+var array<float> lvlPrice = array.new_float()
+var array<int>   lvlDir   = array.new_int()
+var array<int>   lvlBar   = array.new_int()
+
+// a level that has been traded is finished, exactly as in the Python engine.
+// Matched by price rather than by index, because the array shifts as levels expire.
+if not na(justFilledAt) and array.size(lvlPrice) > 0
+    for i = array.size(lvlPrice) - 1 to 0
+        if array.get(lvlDir, i) == justFilledDir and
+           math.abs(array.get(lvlPrice, i) - justFilledAt) <= syminfo.mintick * 2
+            array.remove(lvlPrice, i)
+            array.remove(lvlDir,   i)
+            array.remove(lvlBar,   i)
+    justFilledAt  := na
+    justFilledDir := 0
+
+// drop levels that have waited too long
+if array.size(lvlPrice) > 0
+    for i = array.size(lvlPrice) - 1 to 0
+        if bar_index - array.get(lvlBar, i) > waitBars
+            array.remove(lvlPrice, i)
+            array.remove(lvlDir,   i)
+            array.remove(lvlBar,   i)
+
+// ─── orders ──────────────────────────────────────────────────────────────────
+// Each bar: cancel outstanding entries and re-issue them, because the stop
+// reference is recalculated from the bars available now — exactly as the Python
+// engine computes it from bars strictly before entry.
+for i = 0 to 9
+    strategy.cancel("L" + str.tostring(i))
+    strategy.cancel("S" + str.tostring(i))
+
+canTrade = strategy.position_size == 0 and not dayBlocked and volOk
+
+if canTrade and array.size(lvlPrice) > 0
+    count = math.min(array.size(lvlPrice), 10)
+    for i = 0 to count - 1
+        lv  = array.get(lvlPrice, i)
+        dir = array.get(lvlDir, i)
+        id  = (dir == 1 ? "L" : "S") + str.tostring(i)
+
+        // structural stop: the most recent swing, if it is recent enough
+        ref     = dir == 1 ? lastPivLo : lastPivHi
+        refBar  = dir == 1 ? lastPivLoBar : lastPivHiBar
+        usable  = not na(ref) and not na(refBar) and (bar_index - refBar) <= stopLookback
+
+        if usable
+            stopPx = dir == 1 ? ref - bufferAtr * atr : ref + bufferAtr * atr
+            risk   = (lv - stopPx) * dir
+            if risk >= minStop and risk <= maxStopAtr * atr
+                qty = math.max(1, math.floor(strategy.equity * (riskPct / 100.0) / risk))
+                tgt = lv + rr * risk * dir
+                map.put(riskById, id, risk)
+                strategy.entry(id, dir == 1 ? strategy.long : strategy.short,
+                     qty = qty, limit = lv)
+                // in trailing mode the exit carries no target; the trail provides it
+                strategy.exit(id + "x", from_entry = id, stop = stopPx,
+                     limit = useTrail ? na : tgt)
+
+// ─── trailing variant ────────────────────────────────────────────────────────
+if useTrail and strategy.position_size != 0 and not na(curRisk) and not na(curId)
+    dir     = strategy.position_size > 0 ? 1 : -1
+    entryPx = strategy.position_avg_price
+    openR   = ((dir == 1 ? high : low) - entryPx) * dir / curRisk
+    if openR >= trailStartR
+        trailPx = dir == 1 ? high - trailMult * atr : low + trailMult * atr
+        // same id as the original exit, so this replaces it rather than adding to it
+        strategy.exit(curId + "x", from_entry = curId, stop = trailPx)
+
+// ─── record new levels (after orders, so a level cannot trade on its own bar) ─
+if upTrend and bullWickless
+    array.push(lvlPrice, open)
+    array.push(lvlDir, 1)
+    array.push(lvlBar, bar_index)
+if dnTrend and bearWickless
+    array.push(lvlPrice, open)
+    array.push(lvlDir, -1)
+    array.push(lvlBar, bar_index)
+
+// ─── drawing ─────────────────────────────────────────────────────────────────
+plotshape(showSignals and upTrend and bullWickless, "wickless up", shape.triangleup,
+     location.belowbar, color.new(color.teal, 0), size = size.tiny)
+plotshape(showSignals and dnTrend and bearWickless, "wickless down", shape.triangledown,
+     location.abovebar, color.new(color.orange, 0), size = size.tiny)
+
+if showLevels and upTrend and bullWickless
+    line.new(bar_index, open, bar_index + waitBars, open,
+         color = color.new(color.teal, 40), width = 1)
+if showLevels and dnTrend and bearWickless
+    line.new(bar_index, open, bar_index + waitBars, open,
+         color = color.new(color.orange, 40), width = 1)
+
+bgcolor(dayBlocked ? color.new(color.red, 92) : na, title = "day stopped out")
+
+// ─── on-chart summary ────────────────────────────────────────────────────────
+var table info = table.new(position.top_right, 2, 5, frame_width = 0)
+if barstate.islast
+    wins = strategy.wintrades
+    tot  = strategy.closedtrades
+    table.cell(info, 0, 0, "trades",    text_color = color.gray, text_size = size.small)
+    table.cell(info, 1, 0, str.tostring(tot), text_size = size.small)
+    table.cell(info, 0, 1, "win rate",  text_color = color.gray, text_size = size.small)
+    table.cell(info, 1, 1, tot > 0 ? str.tostring(wins / tot * 100, "#.0") + "%" : "-",
+         text_size = size.small)
+    table.cell(info, 0, 2, "net",       text_color = color.gray, text_size = size.small)
+    table.cell(info, 1, 2, str.tostring(strategy.netprofit, "#"), text_size = size.small)
+    table.cell(info, 0, 3, "day R",     text_color = color.gray, text_size = size.small)
+    table.cell(info, 1, 3, str.tostring(dayR, "#.##"), text_size = size.small)
+    table.cell(info, 0, 4, "vol pct",   text_color = color.gray, text_size = size.small)
+    table.cell(info, 1, 4, na(atrRank) ? "-" : str.tostring(atrRank * 100, "#") + "%",
+         text_size = size.small)

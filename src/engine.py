@@ -16,7 +16,8 @@ from dataclasses import dataclass, asdict, field
 import numpy as np
 import pandas as pd
 
-from engine_fast import last_pivot_arrays, trend_series, wickless_flags
+from engine_fast import (fvg_flags, htf_trend_series, last_pivot_arrays,
+                         trend_series, wickless_flags)
 
 
 @dataclass
@@ -51,6 +52,16 @@ class Params:
     spread_mult: float = 1.0    # stress factor on the recorded spread
     point_size: float = 0.01    # price move represented by one MT5 point
     stop_slip: float = 0.0      # dollars of adverse fill when a stop is hit
+
+    # --- trade management (all off by default) ---
+    be_trigger_r: float = 0.0   # move the stop to breakeven once this much is open
+    be_offset_r: float = 0.0    # park it this far beyond entry, in R
+    trail_mode: str = "none"    # none | atr | structure
+    trail_start_r: float = 0.0  # only start trailing once this much is open
+    trail_atr_mult: float = 2.0
+    partial_r: float = 0.0      # take part of the position off here
+    partial_frac: float = 0.0   # what share to take off
+    time_stop_bars: int = 0     # abandon a trade that has gone nowhere
     tie_break: str = "stop"     # which fills first when one bar spans both
     max_hold: int = 288         # give up after a day of 5m bars
     allow_concurrent: bool = False
@@ -62,6 +73,10 @@ class Params:
     atr_pct_min: float = 0.0    # causal percentile rank of ATR, 0-1
     atr_pct_max: float = 1.0
     atr_rank_window: int = 2000
+    require_fvg: bool = False   # the candle must leave an unfilled gap behind it
+    htf_trend: str = "none"     # none | ema | structure, judged on htf_minutes bars
+    htf_minutes: int = 60
+    htf_len: int = 20
 
 
 def validate_bars(df: pd.DataFrame) -> pd.DataFrame:
@@ -240,7 +255,9 @@ def simulate(df: pd.DataFrame, p: Params) -> pd.DataFrame:
     hours_allowed = set(p.hours_allowed)
 
     side = trend_series(d, p)
+    htf = htf_trend_series(d, p)
     bull, bear = wickless_flags(d, p)
+    fvg_bull, fvg_bear = fvg_flags(d)
     piv_lo_idx, piv_hi_idx, low_arr, high_arr = last_pivot_arrays(d, p.pivot_k)
     roll_low = d["low"].rolling(p.stop_lookback, min_periods=1).min().to_numpy()
     roll_high = d["high"].rolling(p.stop_lookback, min_periods=1).max().to_numpy()
@@ -256,6 +273,31 @@ def simulate(df: pd.DataFrame, p: Params) -> pd.DataFrame:
         bar = t["entry_i"] if t["dir"] == 1 else exit_i
         return float(spread_px[bar]) + p.commission
 
+    def manage(t, i):
+        """Update a live trade's stop using bars up to and including i."""
+        open_r = ((hi[i] - t["entry"]) if t["dir"] == 1 else (t["entry"] - lo[i])) / t["risk"]
+        t["peak_r"] = max(t.get("peak_r", 0.0), open_r)
+
+        if p.be_trigger_r and not t.get("be_done") and t["peak_r"] >= p.be_trigger_r:
+            level = t["entry"] + p.be_offset_r * t["risk"] * t["dir"]
+            better = level > t["stop"] if t["dir"] == 1 else level < t["stop"]
+            if better:
+                t["stop"] = level
+            t["be_done"] = True
+
+        if p.trail_mode != "none" and t["peak_r"] >= p.trail_start_r:
+            if p.trail_mode == "atr":
+                ref = (hi[i] - p.trail_atr_mult * atr_arr[i]) if t["dir"] == 1 else \
+                      (lo[i] + p.trail_atr_mult * atr_arr[i])
+            else:  # structure: the most recent confirmed swing behind price
+                pidx = (piv_lo_idx if t["dir"] == 1 else piv_hi_idx)[i]
+                if pidx < 0:
+                    return
+                ref = (low_arr if t["dir"] == 1 else high_arr)[pidx]
+            better = ref > t["stop"] if t["dir"] == 1 else ref < t["stop"]
+            if better:
+                t["stop"] = ref
+
     def close_out(t, i):
         h_, l_ = hi[i], lo[i]
         hit_stop = l_ <= t["stop"] if t["dir"] == 1 else h_ >= t["stop"]
@@ -267,6 +309,8 @@ def simulate(df: pd.DataFrame, p: Params) -> pd.DataFrame:
             price, reason = t["stop"], "stop"
         elif hit_target:
             price, reason = t["target"], "target"
+        elif p.time_stop_bars and i - t["entry_i"] >= p.time_stop_bars:
+            price, reason = d["close"].iat[i], "time_stop"
         elif i - t["entry_i"] >= p.max_hold:
             price, reason = d["close"].iat[i], "timeout"
         else:
@@ -274,17 +318,30 @@ def simulate(df: pd.DataFrame, p: Params) -> pd.DataFrame:
         if p.stop_slip and reason.startswith(("stop", "ambiguous_stop")):
             price -= p.stop_slip * t["dir"]  # stops fill worse than the level
         gross = (price - t["entry"]) * t["dir"]
-        cost = trade_cost(t, i)
+        remainder = 1.0 - t.get("booked_frac", 0.0)
+        gross_r = gross / t["risk"] * remainder + t.get("booked_r", 0.0)
+        cost = trade_cost(t, i) * (1.0 + t.get("booked_frac", 0.0))
         t.update(exit_i=i, exit_time=times[i], exit=price, reason=reason,
-                 cost=cost, pnl=gross - cost, r=(gross - cost) / t["risk"])
+                 cost=cost, pnl=gross_r * t["risk"] - cost,
+                 r=gross_r - cost / t["risk"])
         return t
 
     for i in range(n):
         if open_trade is not None:
-            done = close_out(open_trade, i)
+            t = open_trade
+            stop_first = lo[i] <= t["stop"] if t["dir"] == 1 else hi[i] >= t["stop"]
+            if p.partial_frac and not t.get("booked_frac") and not stop_first:
+                lvl = t["entry"] + p.partial_r * t["risk"] * t["dir"]
+                hit = hi[i] >= lvl if t["dir"] == 1 else lo[i] <= lvl
+                if hit:
+                    t["booked_frac"] = p.partial_frac
+                    t["booked_r"] = p.partial_r * p.partial_frac
+            done = close_out(t, i)
             if done is not None:
                 trades.append(done)
                 open_trade = None
+            else:
+                manage(t, i)
 
         if pending:
             still = []
@@ -348,16 +405,25 @@ def simulate(df: pd.DataFrame, p: Params) -> pd.DataFrame:
                 if done is not None:
                     trades.append(done)
                     open_trade = None
+                else:
+                    manage(open_trade, i)
             pending = still
 
-        if p.trend == "none":
-            if bull[i]:
-                pending.append({"signal_i": i, "level": o[i], "dir": 1})
-            if bear[i]:
-                pending.append({"signal_i": i, "level": o[i], "dir": -1})
-        elif side[i] == 1 and bull[i]:
-            pending.append({"signal_i": i, "level": o[i], "dir": 1})
-        elif side[i] == -1 and bear[i]:
-            pending.append({"signal_i": i, "level": o[i], "dir": -1})
+        for direction in (1, -1):
+            flag = bull[i] if direction == 1 else bear[i]
+            if not flag:
+                continue
+            if p.trend != "none" and side[i] != direction:
+                continue
+            if p.htf_trend != "none" and htf[i] != direction:
+                continue
+            if p.require_fvg:
+                # the gap is only visible after the following bar closes
+                if i + 1 >= n:
+                    continue
+                gap = fvg_bull[i] if direction == 1 else fvg_bear[i]
+                if not gap:
+                    continue
+            pending.append({"signal_i": i, "level": o[i], "dir": direction})
 
     return pd.DataFrame(trades)

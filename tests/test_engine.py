@@ -173,3 +173,81 @@ def test_stop_slippage_only_worsens_losing_exits():
     # this fixture resolves at the target, so slippage must change nothing
     assert clean.iloc[0]["reason"] == "target"
     assert slipped.iloc[0]["pnl"] == pytest.approx(clean.iloc[0]["pnl"])
+
+
+def _trade_then_path(path_fn, **params):
+    """Build the standard setup, learn the trade's geometry, then append a price path.
+
+    Appending bars after entry cannot change the entry (see test_no_lookahead), so the
+    second run has the same entry, stop and risk as the first.
+    """
+    df, _ = _uptrend_then_retest()
+    probe = simulate(df, Params(stop_mode="atr", atr_mult=1.0, cost=0.0, **params))
+    assert len(probe) == 1
+    tr = probe.iloc[0]
+    entry, risk, idx = float(tr["entry"]), float(tr["risk"]), int(tr["entry_i"])
+    rows = df[["open", "high", "low", "close"]].values.tolist()[: idx + 1]
+    rows += path_fn(entry, risk)
+    return bars(rows), entry, risk
+
+
+def _up_then_reverse(entry, risk):
+    """Rise to +1.2R, then fall back through the original stop."""
+    path, price = [], entry
+    for _ in range(6):
+        nxt = price + 0.25 * risk
+        path.append([price, nxt + 0.02, price - 0.02, nxt])
+        price = nxt
+    for _ in range(14):
+        nxt = price - 0.25 * risk
+        path.append([price, price + 0.02, nxt - 0.02, nxt])
+        price = nxt
+    return path
+
+
+def test_breakeven_stop_rescues_a_trade_that_reversed():
+    df, entry, risk = _trade_then_path(_up_then_reverse)
+    common = dict(stop_mode="atr", atr_mult=1.0, cost=0.0, rr=5.0)
+    plain = simulate(df, Params(**common)).iloc[0]
+    managed = simulate(df, Params(**common, be_trigger_r=1.0)).iloc[0]
+    assert plain["r"] == pytest.approx(-1.0, rel=1e-9)     # full loss without it
+    assert managed["exit"] == pytest.approx(entry, abs=1e-9)
+    assert managed["r"] == pytest.approx(0.0, abs=1e-9)    # scratched instead
+
+
+def test_partial_exit_banks_profit_before_a_loss():
+    df, entry, risk = _trade_then_path(_up_then_reverse)
+    common = dict(stop_mode="atr", atr_mult=1.0, cost=0.0, rr=5.0)
+    plain = simulate(df, Params(**common)).iloc[0]
+    scaled = simulate(df, Params(**common, partial_r=1.0, partial_frac=0.5)).iloc[0]
+    assert plain["r"] == pytest.approx(-1.0, rel=1e-9)
+    # half booked at +1R, half stopped at -1R
+    assert scaled["r"] == pytest.approx(0.5 * 1.0 + 0.5 * -1.0, abs=1e-9)
+
+
+def test_partial_is_not_credited_when_the_stop_goes_first():
+    """A bar that reaches both the partial and the stop must not pay the partial."""
+    df, entry, risk = _trade_then_path(
+        lambda e, r: [[e, e + 2 * r, e - 2 * r, e - 0.5 * r]] * 3
+    )
+    t = simulate(df, Params(stop_mode="atr", atr_mult=1.0, cost=0.0, rr=5.0,
+                            partial_r=1.0, partial_frac=0.5)).iloc[0]
+    assert t["r"] == pytest.approx(-1.0, rel=1e-9)
+
+
+def test_trailing_stop_locks_in_part_of_a_reversed_move():
+    df, entry, risk = _trade_then_path(_up_then_reverse)
+    common = dict(stop_mode="atr", atr_mult=1.0, cost=0.0, rr=5.0)
+    trailed = simulate(df, Params(**common, trail_mode="atr", trail_atr_mult=0.5,
+                                  trail_start_r=0.5)).iloc[0]
+    assert trailed["exit"] > entry
+    assert 0 < trailed["r"] < 1.2
+
+
+def test_time_stop_closes_a_trade_that_went_nowhere():
+    flat = lambda e, r: [[e, e + 0.02 * r, e - 0.02 * r, e]] * 40
+    df, entry, risk = _trade_then_path(flat)
+    t = simulate(df, Params(stop_mode="atr", atr_mult=1.0, cost=0.0, rr=5.0,
+                            time_stop_bars=20)).iloc[0]
+    assert t["reason"] == "time_stop"
+    assert abs(t["r"]) < 0.05

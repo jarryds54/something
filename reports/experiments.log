@@ -1,0 +1,75 @@
+baseline: train +0.0431R (323 trades), validate +0.1995R (112 trades)
+
+=== baseline ===
+  as it stands                       train +0.0431R ( 323) | validate +0.1995R ( 112)
+
+=== target size ===
+  rr 1.25                            train +0.0834R ( 312) | validate +0.2729R ( 110)  <-- beats baseline on both
+  rr 2.5                             train +0.1052R ( 274) | validate +0.2512R ( 101)  <-- beats baseline on both
+  rr 1.75                            train +0.0367R ( 301) | validate +0.2480R ( 107)
+  rr 1.5                             train +0.0632R ( 304) | validate +0.2357R ( 110)  <-- beats baseline on both
+  rr 2.0                             train +0.0659R ( 299) | validate +0.2126R ( 105)  <-- beats baseline on both
+  rr 1.0                             train +0.0431R ( 323) | validate +0.1995R ( 112)
+
+=== stop geometry ===
+  bars stop 50                       train +0.0498R ( 260) | validate +0.3044R (  94)  <-- beats baseline on both
+  atr stop 1.0x                      train +0.0156R ( 407) | validate +0.2410R ( 133)
+  pivot k=3                          train +0.0098R ( 313) | validate +0.2263R ( 109)
+  buffer 0.25 ATR                    train +0.0345R ( 324) | validate +0.2135R ( 113)
+  lookback 10                        train -0.0137R ( 309) | validate +0.2051R ( 103)
+  pivot k=2                          train +0.0431R ( 323) | validate +0.1995R ( 112)
+
+=== breakeven ===
+  BE at 1.0R offset 0.0              train +0.0431R ( 323) | validate +0.1995R ( 112)
+  BE at 1.0R offset 0.1              train +0.0431R ( 323) | validate +0.1995R ( 112)
+  BE at 0.75R offset 0.0             train +0.0669R ( 330) | validate +0.1504R ( 114)
+  BE at 0.75R offset 0.1             train +0.0585R ( 330) | validate +0.1384R ( 115)
+  BE at 0.3R offset 0.1              train +0.0529R ( 366) | validate +0.1154R ( 122)
+  BE at 0.3R offset 0.0              train +0.0383R ( 363) | validate +0.1142R ( 120)
+
+=== trailing ===
+  ATR trail 3.0x from 2.0R           train +0.0310R ( 286) | validate +0.3576R ( 102)
+  structure trail from 2.0R          train +0.0521R ( 286) | validate +0.2971R ( 101)  <-- beats baseline on both
+  ATR trail 2.0x from 2.0R           train +0.0658R ( 293) | validate +0.2941R ( 104)  <-- beats baseline on both
+  ATR trail 3.0x from 1.0R           train -0.0538R ( 308) | validate +0.2871R ( 108)
+  structure trail from 1.0R          train -0.0483R ( 307) | validate +0.2507R ( 107)
+  ATR trail 2.0x from 1.0R           train -0.0024R ( 315) | validate +0.2280R ( 110)
+
+=== partials ===
+  75% at 1.5R, rest to 3.0R          train +0.0431R ( 267) | validate +0.2283R (  95)
+  50% at 1.5R, rest to 3.0R          train +0.0776R ( 267) | validate +0.2185R (  95)  <-- beats baseline on both
+  25% at 1.5R, rest trailing         train +0.0322R ( 296) | validate +0.2129R ( 109)
+  25% at 1.5R, rest to 2.0R          train +0.0507R ( 299) | validate +0.2110R ( 105)  <-- beats baseline on both
+  50% at 1.5R, rest to 2.0R          train +0.0354R ( 299) | validate +0.2094R ( 105)
+  25% at 1.5R, rest to 3.0R          train +0.1122R ( 267) | validate +0.2087R (  95)  <-- beats baseline on both
+
+=== time stop ===
+  give up after 96 bars              train +0.0535R ( 330) | validate +0.1722R ( 113)
+  give up after 48 bars              train +0.0649R ( 341) | validate +0.1229R ( 114)
+  give up after 24 bars              train +0.0386R ( 356) | validate +0.1011R ( 118)
+  give up after 12 bars              train +0.0019R ( 363) | validate +0.0852R ( 121)
+
+=== entry context ===
+  require imbalance                  train +0.0694R ( 112) | validate +0.3773R (  31)  <-- beats baseline on both
+  15m structure trend                train +0.0578R ( 133) | validate +0.2986R (  50)  <-- beats baseline on both
+  vol band 0.3-1.0                   train +0.0154R ( 365) | validate +0.2735R ( 130)
+  vol band 0.6-1.0                   train -0.0260R ( 250) | validate +0.2496R (  82)
+  wait 10 candles                    train +0.0291R ( 343) | validate +0.2299R ( 117)
+  wait 15 candles                    train +0.0177R ( 352) | validate +0.2202R ( 121)
+
+SURVIVORS (better than baseline on both splits):
+  entry context    require imbalance                  train +0.0694R | validate +0.3773R
+  stop geometry    bars stop 50                       train +0.0498R | validate +0.3044R
+  entry context    15m structure trend                train +0.0578R | validate +0.2986R
+  trailing         structure trail from 2.0R          train +0.0521R | validate +0.2971R
+  trailing         ATR trail 2.0x from 2.0R           train +0.0658R | validate +0.2941R
+  target size      rr 1.25                            train +0.0834R | validate +0.2729R
+  target size      rr 2.5                             train +0.1052R | validate +0.2512R
+  target size      rr 1.5                             train +0.0632R | validate +0.2357R
+  partials         50% at 1.5R, rest to 3.0R          train +0.0776R | validate +0.2185R
+  target size      rr 2.0                             train +0.0659R | validate +0.2126R
+  partials         25% at 1.5R, rest to 2.0R          train +0.0507R | validate +0.2110R
+  partials         25% at 1.5R, rest to 3.0R          train +0.1122R | validate +0.2087R
+  trailing         ATR trail 1.5x from 2.0R           train +0.0901R | validate +0.2012R
+
+13 survivors out of 112 variants tested

@@ -206,3 +206,77 @@ stretches, and six losing months in eighteen.
 - One instrument, one 17-month period containing an exceptional gold move.
 - The trend filter is `slope`, a mechanical proxy for a judgement you make by eye.
   It agrees with you often, not always.
+
+---
+
+# Phase four — exhaustive search for a better version
+
+112 single variations plus 20 combinations, all judged on train and validate, with
+the holdout opened only for the three finalists. Costs throughout: measured
+FundingPips spread per bar, $7/lot commission, 10c slippage on every stop.
+
+## First: where do these trades actually go?
+
+Excursion analysis on 592 entries, measured over the following 24 hours in units of
+initial risk, asking how often each target is reached **before** a 1R adverse move:
+
+| target | reached first |
+|---|---|
+| 1.0R | 56.9% |
+| 1.5R | 44.9% |
+| 2.0R | 37.5% |
+| 3.0R | 27.2% |
+| 4.0R | 20.9% |
+
+Gross expectancy implied: 1R → +0.14R, 1.5R → +0.12R, 2R → +0.13R, 3R → +0.09R.
+The 56.9% at 1R matches the engine's win rate exactly, which is a useful check that
+two independent calculations agree. **Your 1:1 target leaves money on the table.**
+
+## What failed
+
+| idea | result |
+|---|---|
+| **breakeven stop** at 0.3R / 0.5R / 0.75R / 1.0R, with and without offset | **every variant below baseline on validate**; the scratches cost more than the saved losses, exactly as the literature predicts |
+| **time stops** at 12 / 24 / 48 / 96 bars | all below baseline; the longer the leash the better, so cutting trades early destroys value |
+| **trailing from 0R, 0.5R or 1R** | negative on train; trailing too early strangles the winners |
+| hour-of-day and session filters (phase two) | overfitted, reversed out of sample |
+| **stacking every filter together** | 11 validation trades, −0.085R; over-filtering |
+| removing the volatility filter | kills everything; it remains essential |
+
+## What worked
+
+- **A wider target.** Everything from 1.25R to 2.5R beat 1:1 on both splits.
+- **Trailing late.** 2× ATR starting at 2–3R is a genuine plateau: train +0.095 to
+  +0.111R and validate +0.266 to +0.382R across the whole neighbourhood.
+- Partials help slightly; imbalance and 15m-structure filters look strong but cut the
+  sample to 31–50 validation trades, too thin to rely on.
+
+## The three finalists, holdout included
+
+| | trades | win rate | mean R | total | max DD | return/DD | worst losing run | longest flat |
+|---|---|---|---|---|---|---|---|---|
+| **A. your rules, 1:1** | 592 | 56.9% | +0.089R | +53R | −11.5R | **4.59** | 6 | 84 days |
+| **B. target 2.5R** | 509 | 35.8% | +0.148R | +75R | −23.2R | 3.24 | 12 | 118 days |
+| **C. trail 2×ATR from 2.5R** | 507 | 33.3% | +0.184R | **+93R** | −22.5R | 4.13 | 12 | 102 days |
+
+Holdout alone: A +0.121R, B +0.157R, C +0.153R. All three positive.
+
+**B is dominated** — it earns less than C for slightly more drawdown. The real choice
+is A against C.
+
+## The trade-off, stated plainly
+
+C earns 76% more per month (5.5R vs 3.1R) for roughly double the drawdown, a win rate
+of one in three, losing runs up to twelve trades, and three-month flat stretches.
+A is calmer, wins more often than it loses, and has the better return-to-drawdown
+ratio, which is what a prop-firm drawdown limit actually tests.
+
+**For a funded-account evaluation, A's profile is the safer instrument. For long-run
+capital growth with the drawdown tolerance to sit through it, C earns more.**
+
+## Caveats that now matter more
+
+- The holdout has been opened twice, which degrades it as evidence.
+- Roughly 130 variations were tested. Some of the gap between A and C is search.
+- C's 33% win rate changes what trading it feels like: a 12-trade losing run is normal,
+  not a malfunction, and most people abandon a system there.

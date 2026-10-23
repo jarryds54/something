@@ -80,3 +80,50 @@ def last_pivot_arrays(d: pd.DataFrame, k: int):
         return idx
 
     return confirmed(is_low), confirmed(is_high), low, high
+
+
+def htf_trend_series(d: pd.DataFrame, p) -> np.ndarray:
+    """Higher-timeframe direction mapped back onto 5m bars, without peeking.
+
+    A higher-timeframe bar's verdict is only available once that bar has closed,
+    so the series is shifted one period before being forward-filled onto 5m bars.
+    """
+    if p.htf_trend == "none":
+        return np.zeros(len(d), dtype=np.int8)
+    g = d.set_index("time")
+    ohlc = (
+        g.resample(f"{p.htf_minutes}min", label="right", closed="left")
+        .agg({"open": "first", "high": "max", "low": "min", "close": "last"})
+        .dropna()
+    )
+    if len(ohlc) < p.htf_len + 2:
+        return np.zeros(len(d), dtype=np.int8)
+
+    side = pd.Series(0, index=ohlc.index, dtype=np.int8)
+    if p.htf_trend == "ema":
+        ema = ohlc["close"].ewm(span=p.htf_len, adjust=False).mean()
+        side[(ohlc["close"] > ema) & (ema > ema.shift(p.htf_len))] = 1
+        side[(ohlc["close"] < ema) & (ema < ema.shift(p.htf_len))] = -1
+    else:  # structure
+        half = max(2, p.htf_len // 2)
+        rh = ohlc["high"].rolling(half).max()
+        rl = ohlc["low"].rolling(half).min()
+        ph = ohlc["high"].rolling(p.htf_len - half).max().shift(half)
+        pl = ohlc["low"].rolling(p.htf_len - half).min().shift(half)
+        side[(rh > ph) & (rl > pl)] = 1
+        side[(rh < ph) & (rl < pl)] = -1
+
+    mapped = side.shift(1).reindex(g.index, method="ffill").fillna(0)
+    return mapped.to_numpy().astype(np.int8)
+
+
+def fvg_flags(d: pd.DataFrame):
+    """Did bar i leave a gap the next bar did not fill? Known once i+1 closes."""
+    high, low = d["high"].to_numpy(), d["low"].to_numpy()
+    n = len(d)
+    bull = np.zeros(n, dtype=bool)
+    bear = np.zeros(n, dtype=bool)
+    if n >= 3:
+        bull[1:-1] = low[2:] > high[:-2]
+        bear[1:-1] = high[2:] < low[:-2]
+    return bull, bear

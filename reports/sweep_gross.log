@@ -1,0 +1,23 @@
+2025-05-27 20:20:00+00:00 to 2026-10-23 07:00:00+00:00 (100,000 bars)
+300 configurations, 300 with at least 10 trades
+
+best:
+     trend  trend_len  wick_tol  wait_bars stop_mode  buffer_atr  trades  win_rate   mean_r   total_r  p_edge_positive
+    slope         10       0.0          7     pivot        0.00    1227  0.539527 0.080157 98.352926          0.99700
+    slope         10       0.0         10     pivot        0.00    1287  0.537685 0.076420 98.352926          0.99625
+structure         20       0.0          7     pivot        0.25    1204  0.537375 0.076385 91.967754          0.99625
+      ema         20       0.0          7     pivot        0.00    1329  0.536494 0.074005 98.352926          0.99675
+structure         20       0.0         10     pivot        0.25    1269  0.535855 0.073261 92.967754          0.99525
+      ema         20       0.0         10     pivot        0.00    1400  0.535000 0.070966 99.352926          0.99625
+structure         20       0.0         10     pivot        0.00    1219  0.534865 0.070569 86.023836          0.99100
+structure         20       0.0          7     pivot        0.00    1164  0.533505 0.067890 79.023836          0.98925
+
+worst:
+ trend  trend_len  wick_tol  wait_bars stop_mode  buffer_atr  trades  win_rate    mean_r     total_r  p_edge_positive
+ none         10      0.05         10      bars        0.25    2598  0.438414 -0.120473 -312.989317              0.0
+ none         10      0.20          7      bars        0.00    2981  0.433412 -0.130641 -389.439928              0.0
+ none         10      0.20          7      bars        0.25    2855  0.415412 -0.167198 -477.349887              0.0
+ none         10      0.20         10      bars        0.00    3346  0.403766 -0.190209 -636.439928              0.0
+ none         10      0.20         10      bars        0.25    3264  0.385723 -0.226823 -740.349887              0.0
+
+across all configurations with >=10 trades: median mean_r +0.000, 50% profitable, total trades 656,254

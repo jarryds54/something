@@ -32,6 +32,7 @@ class Params:
 
     # --- entry ---
     wait_bars: int = 10         # level expires if untouched after this many candles
+    min_wait_bars: int = 1      # ignore retests that arrive sooner than this
 
     # --- stop ---
     stop_mode: str = "pivot"    # pivot | bars | atr
@@ -259,6 +260,9 @@ def simulate(df: pd.DataFrame, p: Params) -> pd.DataFrame:
                     still.append(lv)
                     continue
                 if age > p.wait_bars:
+                    continue
+                if age < p.min_wait_bars:
+                    still.append(lv)
                     continue
                 touched = lo[i] <= lv["level"] if lv["dir"] == 1 else hi[i] >= lv["level"]
                 if not touched:

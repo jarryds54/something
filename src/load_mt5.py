@@ -53,11 +53,13 @@ def guess_server_offset(df: pd.DataFrame) -> int:
     bar of the broker's trading week tells us the shift.
     """
     t = df["time"]
-    friday_last = t[t.dt.dayofweek == 4].dt.hour
-    if friday_last.empty:
+    fri = df[t.dt.dayofweek == 4]
+    if fri.empty:
         return 0
-    typical_close_hour = int(friday_last.mode().iat[0])
-    return int((typical_close_hour + 1 - 21) % 24)
+    # the hour of the LAST bar of each Friday, not the most common Friday hour
+    last_hours = fri.groupby(fri["time"].dt.date)["time"].max().dt.hour
+    close_hour = int(last_hours.mode().iat[0]) + 1  # bar starts at :55, week ends on the hour
+    return int((close_hour - 21) % 24)
 
 
 def report(df: pd.DataFrame) -> str:

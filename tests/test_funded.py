@@ -72,3 +72,33 @@ def test_trailing_limit_is_stricter_than_static():
     static = run_account(r, days_from(20), rules_static, risk_pct=0.01)
     trail = run_account(r, days_from(20), rules_trail, risk_pct=0.01)
     assert trail["trades"] < static["trades"]
+
+
+def test_day_bootstrap_keeps_trades_grouped_into_days():
+    """Resampling must preserve multi-trade days, or the daily limit never binds."""
+    import pandas as pd
+    from funded import day_bootstrap
+    stamps = pd.to_datetime(
+        ["2025-01-06 10:00", "2025-01-06 11:00", "2025-01-06 12:00",  # three in a day
+         "2025-01-07 10:00",                                           # one
+         "2025-01-08 10:00", "2025-01-08 11:00"]                       # two
+    , utc=True)
+    trades = pd.DataFrame({"exit_time": stamps, "r": [-1.0, -1.0, -1.0, 1.0, -1.0, 1.0]})
+    rng = np.random.default_rng(0)
+    r, days = next(day_bootstrap(trades, 1, rng, block_days=2, target_trades=60,
+                                 platform_offset_h=0))
+    counts = pd.Series(days).value_counts()
+    assert set(counts.unique()) <= {1, 2, 3}
+    assert (counts == 3).any(), "the three-trade day must survive resampling"
+
+
+def test_daily_stop_caps_the_loss_on_a_bad_day():
+    """After the self-imposed daily stop, no further trades that day are taken."""
+    r = np.array([-1.0] * 10)
+    same = days_from(10, same_day=True)
+    loose = Rules("loose", (0.50,), daily_loss=0.50, max_loss=0.50)
+    with_stop = run_account(r, same, loose, risk_pct=0.01, daily_stop_r=2.0)
+    without = run_account(r, same, loose, risk_pct=0.01, daily_stop_r=0.0)
+    assert with_stop["balance"] > without["balance"]
+    # stops after the loss passes -2R, so three trades at most
+    assert with_stop["balance"] >= 100_000 * (1 - 0.01 * 3) - 1

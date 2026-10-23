@@ -351,3 +351,69 @@ the account.
 
 Keep the wider-target versions for a personal account where no external drawdown
 limit exists.
+
+---
+
+# Phase six — the actual rules, and the daily stop
+
+Confirmed from the account dashboard: **FundingPips 2-Step Pro — 6% and 6% targets,
+3% daily loss, 6% static maximum loss, no minimum days.**
+
+## A methodology fix that changed the answer
+
+Resampling individual trades spreads them evenly across the calendar and hides the
+daily limit, which only bites when several losses land on the same day. The real
+distribution is uneven: 1 to 9 trades a day, and **the worst day in the sample lost
+5.26R**. The simulation now resamples whole trading days in blocks.
+
+That produces a cliff. At 0.5% risk the worst day costs 2.6% — inside the limit. At
+0.6% it costs 3.16% — a breach.
+
+| risk | pass | daily breach | max breach | months |
+|---|---|---|---|---|
+| 0.30% | 97.7% | 0.0% | 2.3% | 11.7 |
+| 0.40% | 91.6% | 0.0% | 8.3% | 8.2 |
+| **0.50%** | **83.5%** | 0.0% | 16.5% | 5.9 |
+| 0.60% | 50.0% | **35.4%** | 14.6% | 3.9 |
+| 1.00% | 16.2% | 80.2% | 3.7% | 1.1 |
+
+## Stopping for the day after −2R
+
+Removing the cliff by construction: stop trading for the day once down 2R.
+
+| risk | no daily stop | with −2R daily stop | months |
+|---|---|---|---|
+| 0.50% | 83.5% | **94.3%** | 5.6 |
+| 0.60% | 50.0% | **89.7%** | 4.5 |
+| 0.75% | 37.0% | 80.2% | 3.2 |
+| 0.90% | 31.3% | 71.3% | 2.4 |
+| 1.00% | 16.2% | 64.7% | 2.1 |
+
+It eliminates daily breaches entirely up to 0.9% risk, and lets you carry more size
+for the same safety — which is where the time saving comes from.
+
+**Does it make more money? No.** Over the full period it looks like it (+65R vs +53R)
+but that is almost entirely the training period: validate barely moved and holdout was
+slightly worse. The 29 skipped trades averaged −0.43R, which is a small and
+unreliable sample. Use the daily stop because it makes a daily breach arithmetically
+impossible, not because it adds expectancy.
+
+## Once funded (payout at 5%, same limits)
+
+| risk | no daily stop | with −2R stop |
+|---|---|---|
+| 0.50% | 91.6% | **97.0%** |
+| 0.60% | 73.8% | 94.9% |
+| 0.75% | 64.5% | 90.4% |
+
+## Final recommendation for this account
+
+**Your original 1:1 rules, with the volatility filter, at 0.5–0.6% risk per trade,
+stopping for the day after −2R.**
+
+- 0.5% risk: 94.3% pass, about 5.6 months, 97.0% payout rate once funded.
+- 0.6% risk: 89.7% pass, about 4.5 months, 94.9% payout rate once funded.
+
+Do not use the wider-target or trailing versions here. They earn more per trade and
+pass far less often (52% at 0.5% risk), because this account tests drawdown, not
+expectancy. Keep those for a personal account with no external limits.

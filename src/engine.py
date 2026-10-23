@@ -52,6 +52,12 @@ class Params:
 
     atr_len: int = 14
 
+    # --- optional context filters (None disables) ---
+    hours_allowed: tuple = ()   # UTC hours in which an entry may be taken
+    atr_pct_min: float = 0.0    # causal percentile rank of ATR, 0-1
+    atr_pct_max: float = 1.0
+    atr_rank_window: int = 2000
+
 
 def validate_bars(df: pd.DataFrame) -> pd.DataFrame:
     """Reject impossible candles; a feed with bad bars produces fictional signals."""
@@ -85,6 +91,12 @@ def add_indicators(df: pd.DataFrame, p: Params) -> pd.DataFrame:
     ).max(axis=1)
     out["atr"] = tr.ewm(alpha=1 / p.atr_len, adjust=False).mean()
     out["ema"] = out["close"].ewm(span=p.trend_len, adjust=False).mean()
+    # where does current volatility sit against the recent past? strictly backward-looking
+    out["atr_pct"] = (
+        out["atr"].rolling(p.atr_rank_window, min_periods=200)
+        .rank(pct=True)
+        .shift(1)
+    )
     return out
 
 
@@ -213,7 +225,10 @@ def simulate(df: pd.DataFrame, p: Params) -> pd.DataFrame:
     hi = d["high"].to_numpy()
     lo = d["low"].to_numpy()
     atr_arr = d["atr"].to_numpy()
+    atr_pct = d["atr_pct"].to_numpy()
     times = d["time"].to_numpy()
+    hours = d["time"].dt.hour.to_numpy()
+    hours_allowed = set(p.hours_allowed)
 
     side = trend_series(d, p)
     bull, bear = wickless_flags(d, p)
@@ -271,6 +286,14 @@ def simulate(df: pd.DataFrame, p: Params) -> pd.DataFrame:
                 if open_trade is not None and not p.allow_concurrent:
                     still.append(lv)
                     continue
+                if hours_allowed and hours[i] not in hours_allowed:
+                    still.append(lv)
+                    continue
+                if p.atr_pct_min > 0.0 or p.atr_pct_max < 1.0:
+                    rank = atr_pct[i]
+                    if not np.isfinite(rank) or not (p.atr_pct_min <= rank <= p.atr_pct_max):
+                        still.append(lv)
+                        continue
 
                 direction = lv["dir"]
                 fill = min(lv["level"], o[i]) if direction == 1 else max(lv["level"], o[i])

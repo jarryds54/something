@@ -79,3 +79,70 @@ Recorded because discarding them honestly is what keeps the rest trustworthy.
 - Entry assumes a limit order filling at the level. Fills on a touch are not guaranteed.
 - 300 configurations were examined. The out-of-sample and cross-configuration checks
   are what guard against that, but they do not eliminate it.
+
+---
+
+# Phase two — searching for a better configuration
+
+Method: the data was split into train (May 2025–Feb 2026), validate (Feb–Jun 2026)
+and holdout (Jun–Oct 2026). Ideas were generated on train, confirmed on validate,
+and the holdout was spent exactly once on the final configuration.
+
+## Ideas tested
+
+| idea | train | validate | verdict |
+|---|---|---|---|
+| best 12 hours of the day, chosen on train | +0.076R | −0.030R | **overfit** |
+| US session only (12–20 UTC) | +0.030R | −0.074R | **fails** |
+| London session only (7–15 UTC) | −0.066R | +0.119R | **inconsistent** |
+| above-median volatility | +0.044R | +0.058R | **survives** |
+| below-median volatility | −0.092R | +0.010R | fails |
+| signal body ≥ 0.5 ATR | +0.007R | +0.094R | weak on train |
+| signal body ≥ 1.0 ATR | −0.052R | +0.124R | inconsistent |
+| 50-bar wide stop | −0.009R | +0.090R | inconsistent |
+| overlapping positions allowed | −0.017R | +0.024R | no change |
+| trend lookback 20 | −0.057R | +0.026R | worse |
+| wait up to 10 candles | −0.017R | +0.007R | no better than 7 |
+
+The hour-of-day result is the clearest warning: each hour held only 20–40 trades, so
+picking the good ones fitted noise almost perfectly and then reversed out of sample.
+
+## What survived
+
+**Trade only when volatility is above its recent median** (ATR percentile rank against
+the trailing 2,000 bars). It works across a plateau of thresholds (0.3–0.5) rather than
+one lucky value, and the reason is mechanical: in quiet markets the stop is small, so a
+fixed spread is a larger share of risk, and there is less room to reach a 1:1 target
+before noise intervenes.
+
+## Final configuration
+
+    trend=slope, trend_len=10, wick_tol=0.0, wait_bars=7,
+    stop_mode=pivot, buffer_atr=0.0, atr_pct_min=0.4, rr=1.0
+
+| period | trades | win rate | mean R @ $0.25 |
+|---|---|---|---|
+| train | 379 | 54.9% | +0.042R |
+| validate | 139 | 56.1% | +0.085R |
+| **holdout (spent once)** | **191** | **57.6%** | **+0.108R** |
+
+Your unfiltered rules on the same holdout: 324 trades, 56.5%, +0.075R. The filter
+improved the per-trade result in all three periods, by 0.03–0.06R, while roughly
+halving the number of trades. Over the full 17 months at $0.25 the filtered version
+returns +49R against +23R unfiltered.
+
+## Honest caveats
+
+- The three periods are not independent samples of one stable process. The later
+  periods were better for *every* variant, so part of the improvement across splits is
+  regime, not skill. The filter's advantage *within* each period is the real evidence.
+- About twenty ideas were tested. The holdout protects the final number, but the
+  search itself still inflates expectations.
+- Everything still depends on cost. At $0.35 the filtered edge is +0.089R on holdout;
+  the exact figure for FundingPips is unmeasured.
+
+## Next step that would matter most
+
+Export the same 5-minute history from the **FundingPips** terminal. Its spread column
+records the real spread on every bar, which would replace the flat cost assumption
+with the actual cost at the moment of each trade, including the wide ones around news.

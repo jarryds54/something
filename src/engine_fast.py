@@ -40,6 +40,15 @@ def trend_series(d: pd.DataFrame, p) -> np.ndarray:
     else:
         raise ValueError(f"unknown trend mode {p.trend}")
 
+    if p.trend_er_min > 0:
+        # Efficiency ratio: net distance travelled divided by the total path length.
+        # 1.0 is a straight line; near 0 is chop that happens to end up somewhere.
+        net = (close - np.concatenate([np.full(k, np.nan), close[:-k]]))
+        path = pd.Series(np.abs(np.diff(close, prepend=close[0]))).rolling(k).sum().to_numpy()
+        with np.errstate(invalid="ignore", divide="ignore"):
+            er = np.abs(net) / path
+        side[~(er >= p.trend_er_min)] = 0
+
     side[: k + 1] = 0  # not enough history to judge
     return side
 

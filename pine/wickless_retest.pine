@@ -23,8 +23,13 @@ strategy("Wickless Retest - XAUUSD 5m", overlay = true,
 
 // --- inputs ----------------------------------------------------------------
 grpS = "Signal"
+trendMode   = input.string("displacement", "How to judge the trend",
+     options = ["displacement", "structure"], group = grpS,
+     tooltip = "displacement: price has travelled more than N ATR over the lookback - what the backtest used. structure: higher highs and higher lows, which reads more like a chart but trades slightly differently.")
 trendLen    = input.int(10,   "Trend lookback (bars)",        group = grpS, minval = 2)
 trendThresh = input.float(1.0,"Trend strength (x ATR)",       group = grpS, step = 0.1)
+trendER     = input.float(0.0,"Minimum cleanliness (0-1)",    group = grpS, step = 0.05, minval = 0, maxval = 1,
+     tooltip = "Efficiency ratio: net distance divided by the path travelled. 1 is a straight line, near 0 is chop. Raising it makes the trend filter match the eye better, but it tested WORSE on the most recent period - leave at 0 unless you are experimenting.")
 wickTol     = input.float(0.0,"Wick tolerance ($)",           group = grpS, step = 0.001,
      tooltip = "Set this to ONE TICK of the chart you are on. The testing used a feed quoted to 2 decimals, where 'no wick' means the wick is under $0.01. On a feed quoting 3 decimals, 0.0 is a stricter rule than was tested and will find far fewer setups - use 0.01 there to match.")
 waitBars    = input.int(7,    "Candles to wait for the retest", group = grpS, minval = 1)
@@ -61,10 +66,26 @@ showSignals = input.bool(true, "Mark wickless candles", group = grpD)
 // --- indicators ------------------------------------------------------------
 atr = ta.atr(14)
 
-// trend: has price moved more than `trendThresh` ATR over the lookback?
-move    = close - close[trendLen]
-upTrend = bar_index > trendLen and move >  trendThresh * atr
-dnTrend = bar_index > trendLen and move < -trendThresh * atr
+// trend, two ways
+move = close - close[trendLen]
+// efficiency ratio: how direct was the journey? 1 is a straight line
+path  = math.sum(math.abs(close - close[1]), trendLen)
+er    = path > 0 ? math.abs(move) / path : 0.0
+erOk  = trendER <= 0 or er >= trendER
+
+half    = math.max(2, math.floor(trendLen / 2))
+recentH = ta.highest(high, half)
+recentL = ta.lowest(low, half)
+priorH  = ta.highest(high, trendLen - half)[half]
+priorL  = ta.lowest(low, trendLen - half)[half]
+
+upDisp  = move >  trendThresh * atr
+dnDisp  = move < -trendThresh * atr
+upStruc = recentH > priorH and recentL > priorL
+dnStruc = recentH < priorH and recentL < priorL
+
+upTrend = bar_index > trendLen and erOk and (trendMode == "displacement" ? upDisp : upStruc)
+dnTrend = bar_index > trendLen and erOk and (trendMode == "displacement" ? dnDisp : dnStruc)
 
 // volatility regime, judged against the recent past only (shifted by one bar)
 atrRank = ta.percentrank(atr, volWindow)[1] / 100.0

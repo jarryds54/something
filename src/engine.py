@@ -26,6 +26,7 @@ class Params:
     trend: str = "ema"          # none | ema | slope | structure
     trend_len: int = 20         # lookback for whichever trend test is used
     trend_thresh: float = 1.0   # slope mode: required move over the lookback, in ATR
+    trend_er_min: float = 0.0   # minimum efficiency ratio: how CLEAN the move was
 
     # --- signal ---
     wick_tol: float = 0.0       # how many dollars of wick still counts as "wickless"

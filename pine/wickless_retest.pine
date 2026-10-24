@@ -68,6 +68,8 @@ tzOffset    = input.int(3,    "Broker hours ahead of UTC",           group = grp
 grpD = "Display"
 showLevels  = input.bool(true, "Draw levels", group = grpD)
 showSignals = input.bool(true, "Mark wickless candles", group = grpD)
+showTrades  = input.bool(true, "Draw entry, stop and target", group = grpD)
+showR       = input.bool(true, "Label each trade's result in R", group = grpD)
 
 // --- indicators ------------------------------------------------------------
 atr = ta.atr(14)
@@ -123,6 +125,7 @@ var int   lastClosed = 0
 // risk in dollars for each pending order, so the trade that fills is matched to
 // its own risk rather than whichever order happened to be placed last
 var map<string, float> riskById = map.new<string, float>()
+var map<string, float> stopById = map.new<string, float>()
 var float curRisk    = na       // risk of the position currently open
 var string curId     = na
 
@@ -132,13 +135,31 @@ if newDay
 // a position just opened: find which order filled, and remember its risk
 var float justFilledAt = na
 var int   justFilledDir = 0
+var float curStop  = na
+var float curTgt   = na
+var float curEntry = na     // kept for drawing; justFilledAt is cleared further down
+var int   curDir   = 0
 if strategy.position_size != 0 and nz(strategy.position_size[1], 0) == 0
     if strategy.opentrades > 0
-        filled = strategy.opentrades.entry_id(0)
-        curId  := filled
-        curRisk := map.contains(riskById, filled) ? map.get(riskById, filled) : na
-        justFilledAt  := strategy.opentrades.entry_price(0)
-        justFilledDir := strategy.position_size > 0 ? 1 : -1
+        filled  = strategy.opentrades.entry_id(0)
+        entryPx = strategy.opentrades.entry_price(0)
+        dirNow  = strategy.position_size > 0 ? 1 : -1
+        curId   := filled
+        // Risk is the distance from the REAL fill to the stop. Measuring it from
+        // the level instead silently changes the reward-to-risk ratio whenever a
+        // limit order fills better than the level it was resting on.
+        curStop := map.contains(stopById, filled) ? map.get(stopById, filled) : na
+        curRisk := na(curStop) ? na : (entryPx - curStop) * dirNow
+        curTgt  := na(curRisk) ? na : entryPx + rr * curRisk * dirNow
+        map.put(riskById, filled, nz(curRisk, 1.0))
+        justFilledAt  := entryPx
+        justFilledDir := dirNow
+        curEntry      := entryPx
+        curDir        := dirNow
+        // replace the protective stop with the correct stop-and-target pair
+        if not na(curRisk) and curRisk > 0
+            strategy.exit(filled + "x", from_entry = filled, stop = curStop,
+                 limit = useTrail ? na : curTgt)
 
 // bank the R of anything that closed since the previous bar, looking each trade's
 // risk up by the entry it came from - a trade that opened and closed inside one
@@ -205,13 +226,12 @@ if canTrade and array.size(lvlPrice) > 0
             risk   = (lv - stopPx) * dir
             if risk >= minStop and risk <= maxStopAtr * atr
                 qty = math.max(1, math.floor(strategy.equity * (riskPct / 100.0) / risk))
-                tgt = lv + rr * risk * dir
                 map.put(riskById, id, risk)
+                map.put(stopById, id, stopPx)
                 strategy.entry(id, dir == 1 ? strategy.long : strategy.short,
                      qty = qty, limit = lv)
-                // in trailing mode the exit carries no target; the trail provides it
-                strategy.exit(id + "x", from_entry = id, stop = stopPx,
-                     limit = useTrail ? na : tgt)
+                // protective stop only; the target is set from the real fill price
+                strategy.exit(id + "x", from_entry = id, stop = stopPx)
 
 // --- trailing variant ------------------------------------------------------
 if useTrail and strategy.position_size != 0 and not na(curRisk) and not na(curId)
@@ -245,6 +265,47 @@ if showLevels and upTrend and bullWickless
 if showLevels and dnTrend and bearWickless
     line.new(bar_index, open, bar_index + waitBars, open,
          color = color.new(color.orange, 40), width = 1)
+
+// --- draw the live trade ---------------------------------------------------
+var box  tpBox     = na
+var box  slBox     = na
+var line entryLine = na
+
+inPosition = strategy.position_size != 0
+justOpened = inPosition and nz(strategy.position_size[1], 0) == 0
+justClosed = not inPosition and nz(strategy.position_size[1], 0) != 0
+
+if showTrades and justOpened and not na(curStop) and not na(curEntry)
+    tgtPx   = nz(curTgt, curEntry)
+    top     = curDir == 1 ? tgtPx : curEntry
+    bottom  = curDir == 1 ? curEntry : tgtPx
+    sTop    = curDir == 1 ? curEntry : curStop
+    sBottom = curDir == 1 ? curStop : curEntry
+    tpBox := box.new(bar_index, top, bar_index + 1, bottom,
+         border_color = color.new(color.teal, 60), bgcolor = color.new(color.teal, 88))
+    slBox := box.new(bar_index, sTop, bar_index + 1, sBottom,
+         border_color = color.new(color.red, 60), bgcolor = color.new(color.red, 88))
+    entryLine := line.new(bar_index, curEntry, bar_index + 1, curEntry,
+         color = color.new(color.white, 20), width = 1)
+
+// stretch the boxes along as the trade runs
+if showTrades and inPosition and not na(tpBox)
+    box.set_right(tpBox, bar_index + 1)
+    box.set_right(slBox, bar_index + 1)
+    line.set_x2(entryLine, bar_index + 1)
+
+if showR and justClosed and strategy.closedtrades > 0
+    idx   = strategy.closedtrades - 1
+    eid2  = strategy.closedtrades.entry_id(idx)
+    rsk   = map.contains(riskById, eid2) ? map.get(riskById, eid2) : na
+    sz    = strategy.closedtrades.size(idx)
+    denom = na(rsk) ? na : rsk * math.abs(sz)
+    rMult = na(denom) or denom <= 0 ? na : strategy.closedtrades.profit(idx) / denom
+    if not na(rMult)
+        label.new(bar_index, close, str.tostring(rMult, "#.##") + "R",
+             style = rMult > 0 ? label.style_label_down : label.style_label_up,
+             color = rMult > 0 ? color.new(color.teal, 30) : color.new(color.red, 30),
+             textcolor = color.white, size = size.tiny)
 
 bgcolor(dayBlocked ? color.new(color.red, 92) : na, title = "day stopped out")
 

@@ -19,7 +19,13 @@ strategy("Wickless Retest - XAUUSD 5m", overlay = true,
      calc_on_every_tick    = false,
      process_orders_on_close = false,
      commission_type       = strategy.commission.cash_per_contract,
-     commission_value      = 0.035)   // $7 per 100oz lot, charged per side
+     commission_value      = 0.035,   // $7 per 100oz lot, charged per side
+     // Gold positions sized to risk 0.5% carry a notional several times the
+     // account. Pine defaults to 100% margin (no leverage) and silently refuses
+     // those orders, which swallowed ~86% of the trades. 1% = 100:1, the
+     // leverage a prop account actually gives you.
+     margin_long           = 1.0,
+     margin_short          = 1.0)
 
 // --- inputs ----------------------------------------------------------------
 grpS = "Signal"

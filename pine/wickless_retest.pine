@@ -25,14 +25,15 @@ strategy("Wickless Retest - XAUUSD 5m", overlay = true,
 grpS = "Signal"
 trendLen    = input.int(10,   "Trend lookback (bars)",        group = grpS, minval = 2)
 trendThresh = input.float(1.0,"Trend strength (x ATR)",       group = grpS, step = 0.1)
-wickTol     = input.float(0.0,"Wick tolerance ($)",           group = grpS, step = 0.01,
-     tooltip = "0 means the wick must be exactly absent. Any tolerance destroyed the edge in testing.")
+wickTol     = input.float(0.0,"Wick tolerance ($)",           group = grpS, step = 0.001,
+     tooltip = "Set this to ONE TICK of the chart you are on. The testing used a feed quoted to 2 decimals, where 'no wick' means the wick is under $0.01. On a feed quoting 3 decimals, 0.0 is a stricter rule than was tested and will find far fewer setups - use 0.01 there to match.")
 waitBars    = input.int(7,    "Candles to wait for the retest", group = grpS, minval = 1)
 
 grpV = "Filters"
 useVolFilter = input.bool(true, "Only trade above-median volatility", group = grpV)
 volPct       = input.float(0.40,"Minimum ATR percentile",            group = grpV, minval = 0, maxval = 1, step = 0.05)
-volWindow    = input.int(2000,  "Percentile window (bars)",          group = grpV, minval = 200)
+volWindow    = input.int(500,   "Percentile window (bars)",          group = grpV, minval = 200,
+     tooltip = "No trades are taken until this many bars have loaded, so a long window wastes chart history. 500 tested the same as 2000.")
 
 grpE = "Stop and target"
 pivotK      = input.int(2,    "Swing definition (bars either side)", group = grpE, minval = 1)

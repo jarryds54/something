@@ -230,8 +230,12 @@ if canTrade and array.size(lvlPrice) > 0
                 map.put(stopById, id, stopPx)
                 strategy.entry(id, dir == 1 ? strategy.long : strategy.short,
                      qty = qty, limit = lv)
-                // protective stop only; the target is set from the real fill price
-                strategy.exit(id + "x", from_entry = id, stop = stopPx)
+                // A provisional target measured from the level, so a trade that
+                // reaches its target on the entry candle still exits there. It is
+                // corrected to the real fill price as soon as the order fills;
+                // when the fill is at the level, the two are identical anyway.
+                strategy.exit(id + "x", from_entry = id, stop = stopPx,
+                     limit = useTrail ? na : lv + rr * risk * dir)
 
 // --- trailing variant ------------------------------------------------------
 if useTrail and strategy.position_size != 0 and not na(curRisk) and not na(curId)

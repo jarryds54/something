@@ -134,8 +134,8 @@ var array<int>   lvlBar   = array.new_int()
 // Matched by price rather than by index, because the array shifts as levels expire.
 if not na(justFilledAt) and array.size(lvlPrice) > 0
     for i = array.size(lvlPrice) - 1 to 0
-        if array.get(lvlDir, i) == justFilledDir and
-           math.abs(array.get(lvlPrice, i) - justFilledAt) <= syminfo.mintick * 2
+        samePrice = math.abs(array.get(lvlPrice, i) - justFilledAt) <= syminfo.mintick * 2
+        if array.get(lvlDir, i) == justFilledDir and samePrice
             array.remove(lvlPrice, i)
             array.remove(lvlDir,   i)
             array.remove(lvlBar,   i)

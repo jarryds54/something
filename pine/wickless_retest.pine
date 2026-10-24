@@ -1,5 +1,5 @@
 //@version=6
-// Wickless-candle retest — XAUUSD 5-minute
+// Wickless-candle retest - XAUUSD 5-minute
 //
 // Mirrors the Python backtest in this repository (src/engine.py). The rules:
 //   1. In a trend, find a candle with no wick on the trend side
@@ -12,7 +12,7 @@
 // Defaults are the configuration that tested best for a FundingPips 2-Step Pro
 // evaluation: 94.3% simulated pass rate at 0.5% risk with the daily stop.
 
-strategy("Wickless Retest — XAUUSD 5m", overlay = true,
+strategy("Wickless Retest - XAUUSD 5m", overlay = true,
      initial_capital       = 100000,
      default_qty_type      = strategy.fixed,
      pyramiding            = 0,
@@ -21,7 +21,7 @@ strategy("Wickless Retest — XAUUSD 5m", overlay = true,
      commission_type       = strategy.commission.cash_per_contract,
      commission_value      = 0.035)   // $7 per 100oz lot, charged per side
 
-// ─── inputs ──────────────────────────────────────────────────────────────────
+// --- inputs ----------------------------------------------------------------
 grpS = "Signal"
 trendLen    = input.int(10,   "Trend lookback (bars)",        group = grpS, minval = 2)
 trendThresh = input.float(1.0,"Trend strength (x ATR)",       group = grpS, step = 0.1)
@@ -57,7 +57,7 @@ grpD = "Display"
 showLevels  = input.bool(true, "Draw levels", group = grpD)
 showSignals = input.bool(true, "Mark wickless candles", group = grpD)
 
-// ─── indicators ──────────────────────────────────────────────────────────────
+// --- indicators ------------------------------------------------------------
 atr = ta.atr(14)
 
 // trend: has price moved more than `trendThresh` ATR over the lookback?
@@ -87,7 +87,7 @@ if not na(pivHi)
     lastPivHi    := pivHi
     lastPivHiBar := bar_index - pivotK
 
-// ─── daily loss tracking (broker time, not exchange time) ────────────────────
+// --- daily loss tracking (broker time, not exchange time) ------------------
 dayId   = math.floor((time + tzOffset * 3600000) / 86400000)
 newDay  = ta.change(dayId) != 0
 var float dayR       = 0.0
@@ -113,7 +113,7 @@ if strategy.position_size != 0 and nz(strategy.position_size[1], 0) == 0
         justFilledDir := strategy.position_size > 0 ? 1 : -1
 
 // bank the R of anything that closed since the previous bar, looking each trade's
-// risk up by the entry it came from — a trade that opened and closed inside one
+// risk up by the entry it came from - a trade that opened and closed inside one
 // bar never updates curRisk, so that cannot be relied on here
 if strategy.closedtrades > lastClosed
     for i = lastClosed to strategy.closedtrades - 1
@@ -125,7 +125,7 @@ if strategy.closedtrades > lastClosed
 
 dayBlocked = dailyStopR > 0 and dayR <= -dailyStopR
 
-// ─── pending levels ──────────────────────────────────────────────────────────
+// --- pending levels --------------------------------------------------------
 var array<float> lvlPrice = array.new_float()
 var array<int>   lvlDir   = array.new_int()
 var array<int>   lvlBar   = array.new_int()
@@ -150,9 +150,9 @@ if array.size(lvlPrice) > 0
             array.remove(lvlDir,   i)
             array.remove(lvlBar,   i)
 
-// ─── orders ──────────────────────────────────────────────────────────────────
+// --- orders ----------------------------------------------------------------
 // Each bar: cancel outstanding entries and re-issue them, because the stop
-// reference is recalculated from the bars available now — exactly as the Python
+// reference is recalculated from the bars available now - exactly as the Python
 // engine computes it from bars strictly before entry.
 for i = 0 to 9
     strategy.cancel("L" + str.tostring(i))
@@ -185,7 +185,7 @@ if canTrade and array.size(lvlPrice) > 0
                 strategy.exit(id + "x", from_entry = id, stop = stopPx,
                      limit = useTrail ? na : tgt)
 
-// ─── trailing variant ────────────────────────────────────────────────────────
+// --- trailing variant ------------------------------------------------------
 if useTrail and strategy.position_size != 0 and not na(curRisk) and not na(curId)
     dir     = strategy.position_size > 0 ? 1 : -1
     entryPx = strategy.position_avg_price
@@ -195,7 +195,7 @@ if useTrail and strategy.position_size != 0 and not na(curRisk) and not na(curId
         // same id as the original exit, so this replaces it rather than adding to it
         strategy.exit(curId + "x", from_entry = curId, stop = trailPx)
 
-// ─── record new levels (after orders, so a level cannot trade on its own bar) ─
+// --- record new levels (after orders, so a level cannot trade on its own bar) ---
 if upTrend and bullWickless
     array.push(lvlPrice, open)
     array.push(lvlDir, 1)
@@ -205,7 +205,7 @@ if dnTrend and bearWickless
     array.push(lvlDir, -1)
     array.push(lvlBar, bar_index)
 
-// ─── drawing ─────────────────────────────────────────────────────────────────
+// --- drawing ---------------------------------------------------------------
 plotshape(showSignals and upTrend and bullWickless, "wickless up", shape.triangleup,
      location.belowbar, color.new(color.teal, 0), size = size.tiny)
 plotshape(showSignals and dnTrend and bearWickless, "wickless down", shape.triangledown,
@@ -220,7 +220,7 @@ if showLevels and dnTrend and bearWickless
 
 bgcolor(dayBlocked ? color.new(color.red, 92) : na, title = "day stopped out")
 
-// ─── on-chart summary ────────────────────────────────────────────────────────
+// --- on-chart summary ------------------------------------------------------
 var table info = table.new(position.top_right, 2, 5, frame_width = 0)
 if barstate.islast
     wins = strategy.wintrades

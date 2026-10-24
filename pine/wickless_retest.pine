@@ -25,7 +25,10 @@ strategy("Wickless Retest - XAUUSD 5m", overlay = true,
      // those orders, which swallowed ~86% of the trades. 1% = 100:1, the
      // leverage a prop account actually gives you.
      margin_long           = 1.0,
-     margin_short          = 1.0)
+     margin_short          = 1.0,
+     max_labels_count      = 500,
+     max_boxes_count       = 500,
+     max_lines_count       = 500)
 
 // --- inputs ----------------------------------------------------------------
 grpS = "Signal"
@@ -71,6 +74,8 @@ showLevels  = input.bool(true, "Draw levels", group = grpD)
 showSignals = input.bool(true, "Mark wickless candles", group = grpD)
 showTrades  = input.bool(true, "Draw entry, stop and target", group = grpD)
 showR       = input.bool(true, "Label each trade's result in R", group = grpD)
+showWhy     = input.bool(false, "Explain skipped setups", group = grpD,
+     tooltip = "Labels every wickless candle the trend filter rejected, and every level that was touched but not traded, with the reason. Noisy - turn it on to investigate, then off again.")
 
 // --- indicators ------------------------------------------------------------
 atr = ta.atr(14)
@@ -258,6 +263,50 @@ if useTrail and strategy.position_size != 0 and not na(curRisk) and not na(curId
         trailPx = dir == 1 ? high - trailMult * atr : low + trailMult * atr
         // same id as the original exit, so this replaces it rather than adding to it
         strategy.exit(curId + "x", from_entry = curId, stop = trailPx)
+
+// --- why was a setup skipped? ---------------------------------------------
+if showWhy
+    // wickless candles that never became levels because of the trend filter
+    if bullWickless and not upTrend
+        label.new(bar_index, low, "no uptrend", yloc = yloc.belowbar,
+             style = label.style_label_up, color = color.new(color.gray, 55),
+             textcolor = color.white, size = size.tiny)
+    if bearWickless and not dnTrend
+        label.new(bar_index, high, "no downtrend", yloc = yloc.abovebar,
+             style = label.style_label_down, color = color.new(color.gray, 55),
+             textcolor = color.white, size = size.tiny)
+
+    // levels price came back to, that still produced no trade
+    if array.size(lvlPrice) > 0
+        for i = 0 to array.size(lvlPrice) - 1
+            lvW  = array.get(lvlPrice, i)
+            dirW = array.get(lvlDir, i)
+            if bar_index > array.get(lvlBar, i)
+                touched = dirW == 1 ? low <= lvW : high >= lvW
+                if touched
+                    reason = ""
+                    if strategy.position_size != 0
+                        reason := "already in a trade"
+                    else if dayBlocked
+                        reason := "day stopped at -2R"
+                    else if not volOk
+                        reason := "quiet market (" + str.tostring(nz(atrRank, 0) * 100, "#") + "th pct)"
+                    else
+                        refW    = dirW == 1 ? lastPivLo : lastPivHi
+                        refBarW = dirW == 1 ? lastPivLoBar : lastPivHiBar
+                        if na(refW) or na(refBarW) or (bar_index - refBarW) > stopLookback
+                            reason := "no recent swing for the stop"
+                        else
+                            stopW = dirW == 1 ? refW - bufferAtr * atr : refW + bufferAtr * atr
+                            riskW = (lvW - stopW) * dirW
+                            if riskW < minStop
+                                reason := "stop only $" + str.tostring(riskW, "#.##")
+                            else if riskW > maxStopAtr * atr
+                                reason := "stop too wide ($" + str.tostring(riskW, "#.#") + ")"
+                    if reason != ""
+                        label.new(bar_index, lvW, reason, style = label.style_label_left,
+                             color = color.new(color.orange, 45), textcolor = color.white,
+                             size = size.tiny)
 
 // --- record new levels (after orders, so a level cannot trade on its own bar) ---
 if upTrend and bullWickless

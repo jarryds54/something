@@ -50,7 +50,8 @@ grpE = "Stop and target"
 pivotK      = input.int(2,    "Swing definition (bars either side)", group = grpE, minval = 1)
 stopLookback= input.int(20,   "Search this many bars for the swing", group = grpE, minval = 2)
 bufferAtr   = input.float(0.0,"Extra room beyond the swing (x ATR)", group = grpE, step = 0.05)
-minStop     = input.float(0.5,"Minimum stop ($)",                    group = grpE, step = 0.1)
+minStop     = input.float(5.0,"Minimum stop ($)",                    group = grpE, step = 0.5,
+     tooltip = "Skips setups whose stop is too tight to be worth trading. A 55c stop builds a 900-ounce position that commission alone ruins. $5 removes the smallest quarter of setups and tested positive in all three periods; stricter than that only looked good in-sample.")
 maxStopAtr  = input.float(10.0,"Maximum stop (x ATR)",               group = grpE, step = 0.5)
 rr          = input.float(1.0,"Target (x risk)",                     group = grpE, step = 0.25)
 useTrail    = input.bool(false,"Trail instead of a fixed target",    group = grpE,
@@ -125,7 +126,8 @@ var int   lastClosed = 0
 // risk in dollars for each pending order, so the trade that fills is matched to
 // its own risk rather than whichever order happened to be placed last
 var map<string, float> riskById = map.new<string, float>()
-var map<string, float> stopById = map.new<string, float>()
+var map<string, float> stopById  = map.new<string, float>()
+var map<string, float> levelById = map.new<string, float>()
 var float curRisk    = na       // risk of the position currently open
 var string curId     = na
 
@@ -164,12 +166,17 @@ if strategy.position_size != 0 and nz(strategy.position_size[1], 0) == 0
 // bank the R of anything that closed since the previous bar, looking each trade's
 // risk up by the entry it came from - a trade that opened and closed inside one
 // bar never updates curRisk, so that cannot be relied on here
+var float closedLevel = na
+var int   closedDir   = 0
 if strategy.closedtrades > lastClosed
     for i = lastClosed to strategy.closedtrades - 1
         eid  = strategy.closedtrades.entry_id(i)
         rsk  = map.contains(riskById, eid) ? map.get(riskById, eid) : na
         if not na(rsk) and rsk > 0
             dayR += strategy.closedtrades.profit(i) / rsk
+        if map.contains(levelById, eid)
+            closedLevel := map.get(levelById, eid)
+            closedDir   := str.startswith(eid, "L") ? 1 : -1
     lastClosed := strategy.closedtrades
 
 dayBlocked = dailyStopR > 0 and dayR <= -dailyStopR
@@ -181,15 +188,19 @@ var array<int>   lvlBar   = array.new_int()
 
 // a level that has been traded is finished, exactly as in the Python engine.
 // Matched by price rather than by index, because the array shifts as levels expire.
-if not na(justFilledAt) and array.size(lvlPrice) > 0
+usedAt  = na(justFilledAt) ? closedLevel : justFilledAt
+usedDir = na(justFilledAt) ? closedDir : justFilledDir
+if not na(usedAt) and array.size(lvlPrice) > 0
     for i = array.size(lvlPrice) - 1 to 0
-        samePrice = math.abs(array.get(lvlPrice, i) - justFilledAt) <= syminfo.mintick * 2
-        if array.get(lvlDir, i) == justFilledDir and samePrice
+        samePrice = math.abs(array.get(lvlPrice, i) - usedAt) <= syminfo.mintick * 2
+        if array.get(lvlDir, i) == usedDir and samePrice
             array.remove(lvlPrice, i)
             array.remove(lvlDir,   i)
             array.remove(lvlBar,   i)
-    justFilledAt  := na
-    justFilledDir := 0
+justFilledAt  := na
+justFilledDir := 0
+closedLevel   := na
+closedDir     := 0
 
 // drop levels that have waited too long
 if array.size(lvlPrice) > 0
@@ -228,6 +239,7 @@ if canTrade and array.size(lvlPrice) > 0
                 qty = math.max(1, math.floor(strategy.equity * (riskPct / 100.0) / risk))
                 map.put(riskById, id, risk)
                 map.put(stopById, id, stopPx)
+                map.put(levelById, id, lv)
                 strategy.entry(id, dir == 1 ? strategy.long : strategy.short,
                      qty = qty, limit = lv)
                 // A provisional target measured from the level, so a trade that

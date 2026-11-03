@@ -1,5 +1,8 @@
 data/*.csv
 !data/.gitkeep
+!data/btcusd_15m.csv
+!data/btcusd_1h.csv
+!data/btcusd_4h.csv
 reports/*.csv
 __pycache__/
 .pytest_cache/

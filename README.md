@@ -1,3 +1,20 @@
+# Testing discretionary strategies mechanically
+
+Two strategies, each described out loud by a trader rather than written down, turned
+into rules precise enough to run, and then measured. The point in both cases is the same:
+find out how much of the result depends on the parts of the description that were never
+precise, by making each of those parts a parameter and sweeping it.
+
+- **Wickless-candle retest** (XAUUSD, 5-minute) - below.
+- **Fibonacci 0.5 retracement continuation** (crypto, intraday) - rules in
+  [`FIB_STRATEGY.md`](FIB_STRATEGY.md), results in
+  [`reports/FIB_FINDINGS.md`](reports/FIB_FINDINGS.md). Short version: the strategy has
+  almost nothing to do below four-hour bars, it depends far more on how the swing high is
+  identified than on which Fibonacci level is used, and on one year of BTC its edge is
+  not distinguishable from zero.
+
+---
+
 # Wickless-candle retest backtest (XAUUSD, 5-minute)
 
 Tests a discretionary gold strategy mechanically, and measures how much of its
@@ -44,6 +61,14 @@ history immediately after a trade closes must not change that trade.
     src/run_backtest.py        single run or full parameter sweep
     src/load_tool_result.py    broker price payloads -> tidy CSV
     tests/                     correctness and no-lookahead tests
+
+The Fibonacci strategy adds:
+
+    src/fib_engine.py          its rules and trade simulation
+    src/run_fib.py             single run or full parameter sweep
+    src/make_fib_chart.py      the figure in reports/fib_result.png
+    tests/test_fib_engine.py   correctness and no-lookahead tests
+    data/btcusd_*.csv          BTC bars at 15m, 1h and 4h, from the broker feed
 
 ## Running
 
